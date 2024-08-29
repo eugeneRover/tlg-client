@@ -225,7 +225,10 @@ func (c *Client) SendAndWait(msg *Message) (response *Message, err error) {
 	return
 }
 
-// TODO this is redundant
+func (c *Client) ClientId() int {
+	return int(c.client_id)
+}
+
 func (c *Client) AddListener(listener Listener) {
 	c.listenersChan <- listener
 }

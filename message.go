@@ -8,15 +8,15 @@ import (
 
 type Message map[string]interface{}
 
-func NewMessage(_type string, content map[string]interface{}) *Message {
+func NewMessage(force_type string, content map[string]interface{}) *Message {
 	m := make(Message)
 
 	for k, v := range content {
 		m[k] = v
 	}
 
-	if len(_type) > 0 {
-		m["@type"] = _type
+	if len(force_type) > 0 {
+		m["@type"] = force_type
 	}
 
 	return &m
@@ -66,6 +66,11 @@ func (m *Message) Fbool(path string) bool {
 
 func (m *Message) Farray(path string) []interface{} {
 	return field[[]interface{}](m, path)
+}
+
+func (m *Message) Fobject(path string) *Message {
+	k := field[map[string]interface{}](m, path)
+	return NewMessage("", k)
 }
 
 /*
