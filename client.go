@@ -147,8 +147,8 @@ func randStringBytes(n int) string {
 	return string(b)
 }
 
-func (c *Client) updateAuthState(authReady chan<- int) func(m *Message, msg_type string) {
-	return func(m *Message, _ string) {
+func (c *Client) updateAuthState(authReady chan<- int) func(m *Message, msg_type string) ListenerResponse {
+	return func(m *Message, _ string) ListenerResponse {
 		switch m.Fstring("authorization_state.@type") {
 
 		case "authorizationStateWaitTdlibParameters":
@@ -181,7 +181,7 @@ func (c *Client) updateAuthState(authReady chan<- int) func(m *Message, msg_type
 		case "authorizationStateReady":
 			authReady <- 1
 		}
-
+		return STOP_NO_REMOVE
 	}
 }
 
@@ -237,7 +237,7 @@ func (c *Client) NewExtraOnceListener(extra string, handler func(*Message)) *Cli
 	return &ClientExtraOnceListener{extra, c.ClientId(), handler}
 }
 
-func (c *Client) NewTypeListener(_types []string, handler func(*Message, string)) *ClientTypeListener {
+func (c *Client) NewTypeListener(_types []string, handler func(*Message, string) ListenerResponse) *ClientTypeListener {
 	return &ClientTypeListener{_types, c.ClientId(), handler}
 }
 
@@ -278,7 +278,7 @@ Non removable listener
 type ClientTypeListener struct {
 	Types    []string
 	ClientId int
-	Handler  func(msg *Message, msg_type string)
+	Handler  func(msg *Message, msg_type string) ListenerResponse
 }
 
 func (l ClientTypeListener) Process(m *Message) ListenerResponse {
@@ -287,8 +287,7 @@ func (l ClientTypeListener) Process(m *Message) ListenerResponse {
 		return NO_STOP_NO_REMOVE
 	}
 
-	go l.Handler(m, mtype)
-	return STOP_NO_REMOVE
+	return l.Handler(m, mtype)
 }
 
 // //////////////////////////////////////////////////////////////////////////
