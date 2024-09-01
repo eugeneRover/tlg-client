@@ -276,17 +276,18 @@ func (l ClientExtraOnceListener) Process(m *Message) ListenerResponse {
 Non removable listener
 */
 type ClientTypeListener struct {
-	Type     string
+	Types    []string
 	ClientId C.int
-	Handler  func(*Message)
+	Handler  func(msg *Message, msg_type string)
 }
 
 func (l ClientTypeListener) Process(m *Message) ListenerResponse {
-	if m.Type() != l.Type || m.ClientId() != int(l.ClientId) {
+	mtype := m.Type() // it is assumed that @type field exists here
+	if m.ClientId() != int(l.ClientId) || slices.Index(l.Types, mtype) == -1 {
 		return NO_STOP_NO_REMOVE
 	}
 
-	go l.Handler(m)
+	go l.Handler(m, mtype)
 	return STOP_NO_REMOVE
 }
 

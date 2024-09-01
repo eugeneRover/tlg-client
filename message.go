@@ -53,29 +53,29 @@ func (m *Message) ClientId() int {
 }
 
 func (m *Message) Fstring(path string) string {
-	return field[string](m, path)
+	return Field[string](m, path)
 }
 
 func (m *Message) Fnumber(path string) float64 {
-	return field[float64](m, path)
+	return Field[float64](m, path)
 }
 
 func (m *Message) Fbool(path string) bool {
-	return field[bool](m, path)
+	return Field[bool](m, path)
 }
 
 func (m *Message) Farray(path string) []interface{} {
-	return field[[]interface{}](m, path)
+	return Field[[]interface{}](m, path)
 }
 
 func (m *Message) Fobject(path string) *Message {
-	k := field[map[string]interface{}](m, path)
+	k := Field[map[string]interface{}](m, path)
 	return NewMessage("", k)
 }
 
 /*
  */
-func fieldErr[T any](m *Message, path string) (value T, err error) {
+func FieldErr[T any](m *Message, path string) (value T, err error) {
 	names := strings.Split(path, ".")
 	a := *m
 	for i, name := range names {
@@ -105,8 +105,8 @@ func fieldErr[T any](m *Message, path string) (value T, err error) {
 	return
 }
 
-func field[T any](m *Message, path string) T {
-	value, _ := fieldErr[T](m, path)
+func Field[T any](m *Message, path string) T {
+	value, _ := FieldErr[T](m, path)
 	// if err != nil {
 	// 	slog.Warn("Unable to get value", "error", err)
 	// }
