@@ -67,7 +67,10 @@ func (c *Client) Start() <-chan int {
 	// }}
 
 	authorized := make(chan int)
-	c.AddListener(*c.NewTypeListener([]string{"updateAuthorizationState"}, c.updateAuthState(authorized)))
+	c.AddNonRemovableListener([]MessagePredicate{
+		ClientIdPredicate(c.ClientId()), OfTypesPredicate("updateAuthorizationState")},
+		c.updateAuthState(authorized),
+	)
 
 	// start receiver thread,
 	go func(out chan<- string) {
@@ -147,8 +150,8 @@ func randStringBytes(n int) string {
 	return string(b)
 }
 
-func (c *Client) updateAuthState(authReady chan<- int) func(m *Message, msg_type string) ListenerResponse {
-	return func(m *Message, _ string) ListenerResponse {
+func (c *Client) updateAuthState(authReady chan<- int) func(*Message) {
+	return func(m *Message) {
 		switch m.Fstring("authorization_state.@type") {
 
 		case "authorizationStateWaitTdlibParameters":
@@ -181,7 +184,6 @@ func (c *Client) updateAuthState(authReady chan<- int) func(m *Message, msg_type
 		case "authorizationStateReady":
 			authReady <- 1
 		}
-		return STOP_NO_REMOVE
 	}
 }
 
@@ -216,7 +218,7 @@ func (c *Client) SendAndWait(msg *Message) (response *Message, err error) {
 	msg.SetExtra(&extra)
 
 	done := make(chan *Message, 1)
-	c.listenersChan <- *c.NewExtraOnceListener(extra, func(m *Message) { done <- m })
+	c.AddClientExtraOnceListener(extra, func(m *Message) { done <- m })
 
 	if json, err := msg.Json(); err == nil {
 		send(c.client_id, string(json))
@@ -233,12 +235,15 @@ func (c *Client) AddListener(listener Listener) {
 	c.listenersChan <- listener
 }
 
-func (c *Client) NewExtraOnceListener(extra string, handler func(*Message)) *ClientExtraOnceListener {
-	return &ClientExtraOnceListener{extra, c.ClientId(), handler}
+func (c *Client) AddClientExtraOnceListener(extra string, handler func(*Message)) {
+	c.AddListener(OnceListener{
+		[]MessagePredicate{ClientIdPredicate(c.ClientId()), ExtraPredicate(extra)},
+		handler,
+	})
 }
 
-func (c *Client) NewTypeListener(_types []string, handler func(*Message, string) ListenerResponse) *ClientTypeListener {
-	return &ClientTypeListener{_types, c.ClientId(), handler}
+func (c *Client) AddNonRemovableListener(predicates []MessagePredicate, handler func(*Message)) {
+	c.AddListener(NonRemovableListener{predicates, handler})
 }
 
 // //////////////////////////////////////////////////////////////////////////
@@ -257,17 +262,17 @@ type Listener interface {
 /*
 Listener that removes itself after a single hit
 */
-type ClientExtraOnceListener struct {
-	Extra    string
-	ClientId int
-	Handler  func(*Message)
+type OnceListener struct {
+	Predicates []MessagePredicate //all predicates must return true for message to be handled
+	Handler    func(*Message)
 }
 
-func (l ClientExtraOnceListener) Process(m *Message) ListenerResponse {
-	if m.Extra() != l.Extra || m.ClientId() != l.ClientId {
-		return NO_STOP_NO_REMOVE
+func (l OnceListener) Process(m *Message) ListenerResponse {
+	for _, p := range l.Predicates {
+		if !p(m) { //if at least 1 predicate returns false
+			return NO_STOP_NO_REMOVE // do not handle
+		}
 	}
-
 	go l.Handler(m)
 	return STOP_REMOVE
 }
@@ -275,19 +280,39 @@ func (l ClientExtraOnceListener) Process(m *Message) ListenerResponse {
 /*
 Non removable listener
 */
-type ClientTypeListener struct {
-	Types    []string
-	ClientId int
-	Handler  func(msg *Message, msg_type string) ListenerResponse
+type NonRemovableListener struct {
+	Predicates []MessagePredicate //all predicates must return true for message to be handled
+	Handler    func(msg *Message)
 }
 
-func (l ClientTypeListener) Process(m *Message) ListenerResponse {
-	mtype := m.Type() // it is assumed that @type field exists here
-	if m.ClientId() != l.ClientId || slices.Index(l.Types, mtype) == -1 {
-		return NO_STOP_NO_REMOVE
+func (l NonRemovableListener) Process(m *Message) ListenerResponse {
+	for _, p := range l.Predicates {
+		if !p(m) { //if at least 1 predicate returns false
+			return NO_STOP_NO_REMOVE // do not handle
+		}
 	}
-
-	return l.Handler(m, mtype)
+	go l.Handler(m)
+	return STOP_NO_REMOVE
 }
 
 // //////////////////////////////////////////////////////////////////////////
+
+type MessagePredicate func(m *Message) bool
+
+func ClientIdPredicate(cId int) MessagePredicate {
+	return func(m *Message) bool {
+		return m.ClientId() == cId
+	}
+}
+
+func OfTypesPredicate(s ...string) MessagePredicate {
+	return func(m *Message) bool {
+		return slices.Index(s, m.Type()) != -1
+	}
+}
+
+func ExtraPredicate(extra string) MessagePredicate {
+	return func(m *Message) bool {
+		return m.Extra() == extra
+	}
+}
