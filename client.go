@@ -67,7 +67,7 @@ func (c *Client) Start() <-chan int {
 	// }}
 
 	authorized := make(chan int)
-	c.AddListener(*c.NewTypeListener("updateAuthorizationState", c.updateAuthState(authorized)))
+	c.AddListener(*c.NewTypeListener([]string{"updateAuthorizationState"}, c.updateAuthState(authorized)))
 
 	// start receiver thread,
 	go func(out chan<- string) {
@@ -147,8 +147,8 @@ func randStringBytes(n int) string {
 	return string(b)
 }
 
-func (c *Client) updateAuthState(authReady chan<- int) func(m *Message) {
-	return func(m *Message) {
+func (c *Client) updateAuthState(authReady chan<- int) func(m *Message, msg_type string) {
+	return func(m *Message, _ string) {
 		switch m.Fstring("authorization_state.@type") {
 
 		case "authorizationStateWaitTdlibParameters":
@@ -234,11 +234,11 @@ func (c *Client) AddListener(listener Listener) {
 }
 
 func (c *Client) NewExtraOnceListener(extra string, handler func(*Message)) *ClientExtraOnceListener {
-	return &ClientExtraOnceListener{extra, c.client_id, handler}
+	return &ClientExtraOnceListener{extra, c.ClientId(), handler}
 }
 
-func (c *Client) NewTypeListener(_type string, handler func(*Message)) *ClientTypeListener {
-	return &ClientTypeListener{_type, c.client_id, handler}
+func (c *Client) NewTypeListener(_types []string, handler func(*Message, string)) *ClientTypeListener {
+	return &ClientTypeListener{_types, c.ClientId(), handler}
 }
 
 // //////////////////////////////////////////////////////////////////////////
@@ -259,12 +259,12 @@ Listener that removes itself after a single hit
 */
 type ClientExtraOnceListener struct {
 	Extra    string
-	ClientId C.int
+	ClientId int
 	Handler  func(*Message)
 }
 
 func (l ClientExtraOnceListener) Process(m *Message) ListenerResponse {
-	if m.Extra() != l.Extra || m.ClientId() != int(l.ClientId) {
+	if m.Extra() != l.Extra || m.ClientId() != l.ClientId {
 		return NO_STOP_NO_REMOVE
 	}
 
@@ -277,13 +277,13 @@ Non removable listener
 */
 type ClientTypeListener struct {
 	Types    []string
-	ClientId C.int
+	ClientId int
 	Handler  func(msg *Message, msg_type string)
 }
 
 func (l ClientTypeListener) Process(m *Message) ListenerResponse {
 	mtype := m.Type() // it is assumed that @type field exists here
-	if m.ClientId() != int(l.ClientId) || slices.Index(l.Types, mtype) == -1 {
+	if m.ClientId() != l.ClientId || slices.Index(l.Types, mtype) == -1 {
 		return NO_STOP_NO_REMOVE
 	}
 
