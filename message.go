@@ -20,6 +20,11 @@ func NewMessage(content map[string]any) *Message {
 	return &m
 }
 
+func NewMessageJson(js string) (m *Message, err error) {
+	err = json.Unmarshal([]byte(js), m)
+	return
+}
+
 func NewMessage1(field1 string, value1 any) *Message {
 	return NewMessage(map[string]any{field1: value1})
 }

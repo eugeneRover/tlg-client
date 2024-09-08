@@ -17,15 +17,19 @@ const (
 
 // ////////////////////////////////////////////////////////////
 type Client struct {
+	network       string // net.Dial network
+	address       string // net.Dial address
 	client_id     int
 	conn          net.Conn
 	tlg           chan []byte
 	listenersChan chan Listener
 }
 
-func NewClient() (c *Client) {
+func NewClient(network, address string) (c *Client) {
 	c = &Client{}
 
+	c.network = network
+	c.address = address
 	c.tlg = make(chan []byte)
 	c.listenersChan = make(chan Listener, 100)
 	return
@@ -37,7 +41,7 @@ Connects to tlg-cocket-proxy, receives tlg client_id, start receiving and dispat
 func (c *Client) Start() (err error) {
 
 	//connect
-	c.conn, err = net.Dial("unix", "/tmp/tlg-socket-proxy.sock") //TODO const or cfg
+	c.conn, err = net.Dial(c.network, c.address)
 	if err != nil {
 		slog.Error("Cannot connect to tlg-socket-proxy", "error", err)
 		return
