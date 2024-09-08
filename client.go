@@ -1,100 +1,96 @@
 package client
 
 import (
+	"encoding/binary"
 	"encoding/json"
+	"io"
 	"log/slog"
+	"net"
 	"slices"
-	"unsafe"
 
 	"golang.org/x/exp/rand"
 )
 
-// #cgo pkg-config: tdjson
-// #include <td/telegram/td_json_client.h>
-// #include <stdlib.h>
-import "C"
-
 const (
-	RECEIVE_TIMEOUT       = C.double(5) //sec
 	RANDOM_STRING_CONTENT = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890"
 )
 
 // ////////////////////////////////////////////////////////////
 type Client struct {
-	client_id      C.int
-	tlg            chan string
-	listenersChan  chan Listener
-	allOther       chan Message
-	getTdlibParams func() map[string]interface{}
-	getPhone       func() string
-	getCode        func() string
-	getPassword    func() string
+	client_id     int
+	conn          net.Conn
+	tlg           chan []byte
+	listenersChan chan Listener
 }
 
-func NewClient(
-	getTdlibParams func() map[string]interface{},
-	getPhone func() string,
-	getCode func() string,
-	getPassword func() string) (c *Client) {
+func NewClient() (c *Client) {
 	c = &Client{}
 
-	c.client_id = C.td_create_client_id()
-	c.Send(NewMessage("setLogVerbosityLevel", Message{"new_verbosity_level": 0}))
-	c.Send(NewMessage("setLogStream", Message{"log_stream": Message{"@type": "logStreamEmpty"}}))
-
-	c.tlg = make(chan string)
+	c.tlg = make(chan []byte)
 	c.listenersChan = make(chan Listener, 100)
-	c.allOther = make(chan Message, 100)
-	c.getTdlibParams = getTdlibParams
-	c.getPhone = getPhone
-	c.getCode = getCode
-	c.getPassword = getPassword
 	return
 }
 
 /*
-Starts receiving and dispatching messages, and authorization flow
-Returns channel that will receive something on authStateReady
+Connects to tlg-cocket-proxy, receives tlg client_id, start receiving and dispatching messages
 */
-func (c *Client) Start() <-chan int {
+func (c *Client) Start() (err error) {
 
-	// c.listenersChan <- ClientTypeListener{"updateOption", c.client_id, func(m *Message) {
-	// 	var v2 any
-	// 	if v1, ok := (*m)["value"]; ok {
-	// 		v2 = (v1.(map[string]interface{}))["value"]
-	// 	}
-	// 	slog.Info("UpdateOption", "name", (*m)["name"], "value", v2)
-	// }}
+	//connect
+	c.conn, err = net.Dial("unix", "/tmp/tlg-socket-proxy.sock") //TODO const or cfg
+	if err != nil {
+		slog.Error("Cannot connect to tlg-socket-proxy", "error", err)
+		return
+	}
 
-	authorized := make(chan int)
-	c.AddNonRemovableListener([]MessagePredicate{
-		ClientIdPredicate(c.ClientId()), OfTypesPredicate("updateAuthorizationState")},
-		c.updateAuthState(authorized),
-	)
+	//read client id
+	id_buf := make([]byte, 4)
+	_, err = io.ReadFull(c.conn, id_buf)
+	if err != nil {
+		slog.Error("Cannot read client id from tlg-socket-proxy", "error", err)
+		return
+	}
+	c.client_id = int(binary.BigEndian.Uint32(id_buf))
+	slog.Info("Received", "client id", c.client_id)
 
 	// start receiver thread,
-	go func(out chan<- string) {
-		for {
-			if result := C.td_receive(RECEIVE_TIMEOUT); result != nil {
-				out <- C.GoString(result)
-			}
-		}
-	}(c.tlg)
+	go read_loop(c.conn, c.tlg)
 
 	//start dispatcher
-	go dispatcher(c.tlg, c.listenersChan, c.allOther)
+	go dispatcher(c.tlg, c.listenersChan)
 
-	//start unhandled messages reader thread
-	go func(inp <-chan Message) {
-		for range inp {
-			// slog.Info("Not handled", "message", msg)
-		}
-	}(c.allOther)
-
-	return authorized
+	return
 }
 
-func dispatcher(tlg <-chan string, listenersChan <-chan Listener, allOther chan<- Message) {
+// start reading messages from tlg-socket-server
+func read_loop(conn net.Conn, dest chan []byte) {
+	for {
+		// read 4 bytes - L=length of following message
+		len_buf := make([]byte, 4)
+		_, err := io.ReadFull(conn, len_buf)
+		if err == nil {
+			// read L bytes (see above) - message
+			msg_len := binary.BigEndian.Uint32(len_buf)
+			msg_buf := make([]byte, msg_len)
+			_, err = io.ReadFull(conn, msg_buf)
+			if err == nil {
+				dest <- msg_buf
+				continue
+			}
+		}
+
+		if err == io.EOF {
+			slog.Error("Server closed connection")
+			close(dest)
+			return
+		}
+
+		slog.Error("Cannot read incoming message, skipping", "error", err)
+		continue
+	}
+}
+
+func dispatcher(tlg <-chan []byte, listenersChan <-chan Listener) {
 	var listeners []Listener //chain of responsibility
 
 MainCycle:
@@ -105,7 +101,7 @@ MainCycle:
 
 		case msg := <-tlg:
 			m := make(Message)
-			if json.Unmarshal([]byte(msg), &m) != nil {
+			if json.Unmarshal(msg, &m) != nil {
 				slog.Error("Unable to unmarchal incoming message", "json", msg)
 				continue
 			}
@@ -119,27 +115,18 @@ MainCycle:
 					continue MainCycle // receive next message
 				}
 			}
-
-			// no listener desired to stop processing, sending to default chan
-			allOther <- m
 		}
 	}
 }
 
-func send(client_id C.int, jq string) {
+func (c *Client) send(data []byte) (err error) {
+	len_buf := make([]byte, 4)
+	binary.BigEndian.PutUint32(len_buf, uint32(len(data)))
 
-	query := C.CString(jq)
-	defer C.free(unsafe.Pointer(query))
-
-	C.td_send(client_id, query)
-}
-
-func execute(jq string) string {
-	query := C.CString(jq)
-	defer C.free(unsafe.Pointer(query))
-
-	cs := C.td_execute(query)
-	return C.GoString(cs)
+	if _, err = c.conn.Write(len_buf); err == nil {
+		_, err = c.conn.Write(data)
+	}
+	return
 }
 
 func randStringBytes(n int) string {
@@ -150,64 +137,13 @@ func randStringBytes(n int) string {
 	return string(b)
 }
 
-func (c *Client) updateAuthState(authReady chan<- int) func(*Message) {
-	return func(m *Message) {
-		switch m.Fstring("authorization_state.@type") {
-
-		case "authorizationStateWaitTdlibParameters":
-			resp, _ := c.SendAndWait(NewMessage("setTdlibParameters", c.getTdlibParams()))
-			if !resp.IsOk() {
-				slog.Error("Unable to setTdlibParameters", "answer", resp)
-			}
-		case "authorizationStateWaitPhoneNumber":
-			resp, _ := c.SendAndWait(NewMessage("setAuthenticationPhoneNumber", map[string]interface{}{
-				"phone_number": c.getPhone(),
-			}))
-			if !resp.IsOk() {
-				slog.Error("Unable to setAuthenticationPhoneNumber", "answer", resp)
-			}
-		case "authorizationStateWaitCode":
-			resp, _ := c.SendAndWait(NewMessage("checkAuthenticationCode", map[string]interface{}{
-				"code": c.getCode(),
-			}))
-			if !resp.IsOk() {
-				slog.Error("Unable to checkAuthenticationCode", "answer", resp)
-			}
-
-		case "authorizationStateWaitPassword":
-			resp, _ := c.SendAndWait(NewMessage("checkAuthenticationPassword", map[string]interface{}{
-				"password": c.getPassword(),
-			}))
-			if !resp.IsOk() {
-				slog.Error("Unable to checkAuthenticationPassword", "answer", resp)
-			}
-		case "authorizationStateReady":
-			authReady <- 1
-		}
-	}
-}
-
-// asynchronous
-func (c *Client) Execute(msg *Message) (result *Message, err error) {
-	js, err := msg.Json()
-	if err != nil {
-		return
-	}
-	s := []byte(execute(string(js)))
-	m := make(Message)
-	err = json.Unmarshal(s, &m)
-
-	result = &m
-	return
-}
-
 // asynchronous
 func (c *Client) Send(msg *Message) (err error) {
 	extra := randStringBytes(40)
 	msg.SetExtra(&extra)
 
 	if json, err := msg.Json(); err == nil {
-		send(c.client_id, string(json))
+		c.send(json)
 	}
 	return
 }
@@ -221,7 +157,7 @@ func (c *Client) SendAndWait(msg *Message) (response *Message, err error) {
 	c.AddClientExtraOnceListener(extra, func(m *Message) { done <- m })
 
 	if json, err := msg.Json(); err == nil {
-		send(c.client_id, string(json))
+		c.send(json)
 		response = <-done
 	}
 	return

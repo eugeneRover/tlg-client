@@ -6,26 +6,49 @@ import (
 	"strings"
 )
 
-type Message map[string]interface{}
+type Message map[string]any
 
-func NewMessage(force_type string, content map[string]interface{}) *Message {
+func NewMessageWithType(force_type string, content map[string]any) *Message {
+	return NewMessage(content).With("@type", force_type)
+}
+
+func NewMessage(content map[string]any) *Message {
 	m := make(Message)
-
 	for k, v := range content {
 		m[k] = v
 	}
-
-	if len(force_type) > 0 {
-		m["@type"] = force_type
-	}
-
 	return &m
 }
 
-func (m *Message) SetExtra(extra *string) {
-	if extra != nil {
-		(*m)["@extra"] = extra
+func NewMessage1(field1 string, value1 any) *Message {
+	return NewMessage(map[string]any{field1: value1})
+}
+
+func NewMessage2(field1 string, value1 any, field2 string, value2 any) *Message {
+	return NewMessage(map[string]any{field1: value1, field2: value2})
+}
+
+func NewMessage3(field1 string, value1 any, field2 string, value2 any, field3 string, value3 any) *Message {
+	return NewMessage(map[string]any{field1: value1, field2: value2, field3: value3})
+}
+
+func NewMessage4(field1 string, value1 any, field2 string, value2 any, field3 string, value3 any, field4 string, value4 any) *Message {
+	return NewMessage(map[string]any{field1: value1, field2: value2, field3: value3, field4: value4})
+}
+
+func NewMessage5(field1 string, value1 any, field2 string, value2 any, field3 string, value3 any, field4 string, value4 any, field5 string, value5 any) *Message {
+	return NewMessage(map[string]any{field1: value1, field2: value2, field3: value3, field4: value4, field5: value5})
+}
+
+func (m *Message) With(field string, value any) *Message {
+	if value != nil {
+		(*m)[field] = value
 	}
+	return m
+}
+
+func (m *Message) SetExtra(extra *string) *Message {
+	return m.With("@extra", extra)
 }
 
 func (m *Message) Json() (result []byte, err error) {
@@ -64,17 +87,15 @@ func (m *Message) Fbool(path string) bool {
 	return Field[bool](m, path)
 }
 
-func (m *Message) Farray(path string) []interface{} {
-	return Field[[]interface{}](m, path)
+func (m *Message) Farray(path string) []any {
+	return Field[[]any](m, path)
 }
 
 func (m *Message) Fobject(path string) *Message {
-	k := Field[map[string]interface{}](m, path)
-	return NewMessage("", k)
+	k := Field[map[string]any](m, path)
+	return NewMessage(k)
 }
 
-/*
- */
 func FieldErr[T any](m *Message, path string) (value T, err error) {
 	names := strings.Split(path, ".")
 	a := *m
@@ -86,7 +107,7 @@ func FieldErr[T any](m *Message, path string) (value T, err error) {
 		}
 
 		if i < len(names)-1 { //is not last key
-			y, isObject := x.(map[string]interface{})
+			y, isObject := x.(map[string]any)
 			if !isObject { //and should be object(map)
 				err = fmt.Errorf("key value is not a map: %v", name)
 				return
