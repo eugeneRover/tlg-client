@@ -167,6 +167,30 @@ func (c *Client) SendAndWait(msg *Message) (response *Message, err error) {
 	return
 }
 
+func (c *Client) SendAndWait0(msg_type string) (response *Message, err error) {
+	return c.SendAndWait(NewMessageType(msg_type))
+}
+
+func (c *Client) SendAndWait1(field1 string, value1 any) (response *Message, err error) {
+	return c.SendAndWait(NewMessage1(field1, value1))
+}
+
+func (c *Client) SendAndWait2(field1 string, value1 any, field2 string, value2 any) (response *Message, err error) {
+	return c.SendAndWait(NewMessage2(field1, value1, field2, value2))
+}
+
+func (c *Client) SendAndWait3(field1 string, value1 any, field2 string, value2 any, field3 string, value3 any) (response *Message, err error) {
+	return c.SendAndWait(NewMessage3(field1, value1, field2, value2, field3, value3))
+}
+
+func (c *Client) SendAndWait4(field1 string, value1 any, field2 string, value2 any, field3 string, value3 any, field4 string, value4 any) (response *Message, err error) {
+	return c.SendAndWait(NewMessage4(field1, value1, field2, value2, field3, value3, field4, value4))
+}
+
+func (c *Client) SendAndWait5(field1 string, value1 any, field2 string, value2 any, field3 string, value3 any, field4 string, value4 any, field5 string, value5 any) (response *Message, err error) {
+	return c.SendAndWait(NewMessage5(field1, value1, field2, value2, field3, value3, field4, value4, field5, value5))
+}
+
 func (c *Client) ClientId() int {
 	return int(c.client_id)
 }

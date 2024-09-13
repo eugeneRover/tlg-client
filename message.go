@@ -4,9 +4,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 )
 
 type Message map[string]any
+
+func NewMessageType(_type string) *Message {
+	return NewMessage(map[string]any{"@type": _type})
+}
 
 func NewMessageWithType(force_type string, content map[string]any) *Message {
 	return NewMessage(content).With("@type", force_type)
@@ -99,6 +104,10 @@ func (m *Message) Farray(path string) []any {
 func (m *Message) Fobject(path string) *Message {
 	k := Field[map[string]any](m, path)
 	return NewMessage(k)
+}
+
+func (m *Message) Ftimestamp(path string) time.Time {
+	return time.Unix(int64(m.Fnumber(path)), 0)
 }
 
 func FieldErr[T any](m *Message, path string) (value T, err error) {
